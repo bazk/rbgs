@@ -52,12 +52,13 @@ void jacobi(int nx, int ny, int num_threads, int num_iterations) {
             for (iy=1; iy<ny; ++iy) {
                 sum = 0;
 
-                sum += -(previous_grid[(ix-1)*(ny+1) + iy] / hx*hx);
-                sum += -(previous_grid[(ix+1)*(ny+1) + iy] / hx*hx);
-                sum += -(previous_grid[ix*(ny+1) + (iy-1)] / hy*hy);
-                sum += -(previous_grid[ix*(ny+1) + (iy+1)] / hy*hy);
+                sum += (-1 / (hx*hx)) * previous_grid[(ix-1)*(ny+1) + iy];
+                sum += (-1 / (hx*hx)) * previous_grid[(ix+1)*(ny+1) + iy];
+                sum += (-1 / (hy*hy)) * previous_grid[ix*(ny+1) + (iy-1)];
+                sum += (-1 / (hy*hy)) * previous_grid[ix*(ny+1) + (iy+1)];
 
-                current_grid[ix*(ny+1) + iy] = (f(ix*hx, iy*hy) - sum) / (2 / hx*hx + 2 / hy*hy + K*K);
+                current_grid[ix*(ny+1) + iy] = (f(ix*hx, iy*hy) - sum) /
+                                                    (2 / hx*hx + 2 / hy*hy + K*K);
             }
         }
     }

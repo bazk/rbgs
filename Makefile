@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -O3 -Wall -Winline -Wshadow -fopenmp
-LDFLAGS =
+LDFLAGS = -lm
 
 OBJS = rbgs.o
 BIN = rbgs

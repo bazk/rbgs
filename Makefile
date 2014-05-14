@@ -1,19 +1,13 @@
 CC = gcc
-CFLAGS = -O3 -Wall -Winline -Wshadow -fopenmp
-LDFLAGS = -lm
-
-OBJS = rbgs.o
+CFLAGS = -O3 -Wall -Winline -Wshadow -fopenmp -lm
 BIN = rbgs
 
 all: $(BIN)
 
 clean:
-	rm -rf $(BIN) $(OBJS)
+	rm -rf $(BIN)
 
 rebuild: clean all
 
-$(BIN): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+$(BIN): rbgs.c
+	$(CC) $(CFLAGS) -o $@ $^

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <omp.h>
 
 #define USAGE "Usage:\n\trbgs nx ny t c [j|g]\n\nWhere:\n \
  nx,ny\tnumber of discretization intervals in x and y axis, repectively\n \
@@ -49,6 +50,7 @@ void jacobi() {
         previous_grid = current_grid;
         current_grid = tmp;
 
+        #pragma omp parallel for collapse(2) private(sum)
         for (ix=1; ix<nx; ++ix) {
             for (iy=1; iy<ny; ++iy) {
                 sum = 0;
@@ -70,8 +72,54 @@ void gauss() {
     double sum;
 
     for (it=0; it<num_iterations; ++it) {
-        for (ix=1; ix<nx; ++ix) {
-            for (iy=1; iy<ny; ++iy) {
+        // red
+        #pragma omp parallel for collapse(2) private(sum)
+        for (ix=1; ix<nx; ix += 2) {
+            for (iy=1; iy<ny; iy += 2) {
+                sum = 0;
+
+                sum -= current_grid[(ix-1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[(ix+1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[ix*(ny+1) + (iy-1)] / (hy*hy);
+                sum -= current_grid[ix*(ny+1) + (iy+1)] / (hy*hy);
+
+                current_grid[ix*(ny+1) + iy] = (f(ix*hx, iy*hy) - sum) /
+                                                    (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+            }
+        }
+        #pragma omp parallel for collapse(2) private(sum)
+        for (ix=2; ix<nx; ix += 2) {
+            for (iy=2; iy<ny; iy += 2) {
+                sum = 0;
+
+                sum -= current_grid[(ix-1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[(ix+1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[ix*(ny+1) + (iy-1)] / (hy*hy);
+                sum -= current_grid[ix*(ny+1) + (iy+1)] / (hy*hy);
+
+                current_grid[ix*(ny+1) + iy] = (f(ix*hx, iy*hy) - sum) /
+                                                    (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+            }
+        }
+
+        // black
+        #pragma omp parallel for collapse(2) private(sum)
+        for (ix=1; ix<nx; ix += 2) {
+            for (iy=2; iy<ny; iy += 2) {
+                sum = 0;
+
+                sum -= current_grid[(ix-1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[(ix+1)*(ny+1) + iy] / (hx*hx);
+                sum -= current_grid[ix*(ny+1) + (iy-1)] / (hy*hy);
+                sum -= current_grid[ix*(ny+1) + (iy+1)] / (hy*hy);
+
+                current_grid[ix*(ny+1) + iy] = (f(ix*hx, iy*hy) - sum) /
+                                                    (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+            }
+        }
+        #pragma omp parallel for collapse(2) private(sum)
+        for (ix=2; ix<nx; ix += 2) {
+            for (iy=1; iy<ny; iy += 2) {
                 sum = 0;
 
                 sum -= current_grid[(ix-1)*(ny+1) + iy] / (hx*hx);
@@ -93,7 +141,7 @@ void cleanup() {
 
 int main(int argc, char **argv) {
     int ix, iy;
-    double sum, residue;
+    double sum, residue, begin_time, end_time;
     FILE *solution;
 
     if (argc != 6) {
@@ -133,6 +181,10 @@ int main(int argc, char **argv) {
 
     init_grid();
 
+    omp_set_num_threads(num_threads);
+
+    begin_time = omp_get_wtime();
+
     // calculate using the appropriate method
     switch (argv[5][0]) {
     case 'j':
@@ -146,6 +198,8 @@ int main(int argc, char **argv) {
         cleanup();
         exit(1);
     }
+
+    end_time = omp_get_wtime();
 
     // write solution to file
     if ((solution = fopen("solution.txt", "w")) == NULL) {
@@ -176,8 +230,10 @@ int main(int argc, char **argv) {
             residue += pow(f(ix*hx, iy*hy) - sum, 2);
         }
     }
-    printf("%lf\n", sqrt(residue));
 
-    cleanup();    
+    printf("Tempo total de processamento: %lf segundos\n", end_time-begin_time);
+    printf("Norma L2 do resíduo: %lf\n", sqrt(residue));
+
+    cleanup();
     exit(0);
 }

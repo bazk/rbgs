@@ -16,7 +16,11 @@
 
 #define F(X, Y) 4 * M_PI * M_PI * sin(2 * M_PI * X) * sinh(2 * M_PI * Y)
 
-#define L(X, Y) ((int) floor((X) / 2.0) * (ny+1) + (Y))
+#define L(X, Y) ((int) floor((X) / 2.0) * (ny-1) + (Y))
+
+
+#define INCREMENT(A, B) if (++B == ny-1) { A += 2; B = 0; } \
+                        else { A += (A % 2 == 0) ? 1 : -1; }
 
 int nx, ny, num_threads, num_iterations;
 double *current_grid, *previous_grid;
@@ -24,6 +28,35 @@ double *f;
 double hx, hy;
 
 double *grid_red, *grid_black, *f_red, *f_black;
+double *border;
+
+inline double sum_neighbours(double *grid, int i, int ix, int iy) {
+    double sum = 0;
+
+    if (ix % 2 == 0) {
+        if (ix > 0)
+            sum -= grid[i-(ny-1)] / (hx*hx);
+
+        if (ix < nx-2)
+            sum -= grid[i] / (hx*hx);
+    }
+    else {
+        sum -= grid[i] / (hx*hx);
+
+        if (ix < nx-2)
+            sum -= grid[i+(ny-1)] / (hx*hx);
+    }
+
+    if (iy > 0)
+        sum -= grid[i-1] / (hy*hy);
+
+    if (iy < (ny-2))
+        sum -= grid[i+1] / (hy*hy);
+    else
+        sum -= border[ix+1] / (hy*hy);
+
+    return sum;
+}
 
 void init_grid() {
     int ix, iy;
@@ -79,14 +112,18 @@ void gauss() {
     int size, step, size_unrolled;
     int iix;
 
-    step = ceil((nx+1) / 2.0);
-    size = step * (ny+1);
+    step = ceil((nx-1) / 2.0);
+    size = step * (ny-1);
     size_unrolled = (int) ceil(size/4.0);
 
     grid_red = (double*) malloc(size * sizeof(double));
     grid_black = (double*) malloc(size * sizeof(double));
     f_red = (double*) malloc(size * sizeof(double));
     f_black = (double*) malloc(size * sizeof(double));
+
+    border = (double*) malloc((nx+1) * sizeof(double));
+    for (ix=0; ix<(nx+1); ix++)
+        border[ix] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
 
     if ((grid_red == NULL) || (grid_black == NULL)) {
         fprintf(stderr, "error: memory allocation failed\n");
@@ -99,172 +136,52 @@ void gauss() {
         double sum;
         int dy;
 
+        double sumv[4];
+
         likwid_markerThreadInit();
 
         #pragma omp for
         for (i=0; i<size; i+=4) {
-            ix = (int) i / (ny+1);
+            ix = (int) i / (ny-1);
             if (ix % 2 == 0) {
                 ix = ix * 2;
-                ix += 0;
+                ix += (i % 2 != 0) ? 1 : 0;
             }
             else {
                 ix = ix * 2;
-                ix += 1;
+                ix += (i % 2 == 0) ? 1 : 0;
             }
-            iy = i % (ny+1);
+            iy = i % (ny-1);
 
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_red[i] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_red[i] = 0;
-
-                f_red[i] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_red[i+1] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_red[i+1] = 0;
-
-                f_red[i+1] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_red[i+2] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_red[i+2] = 0;
-
-                f_red[i+2] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_red[i+3] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_red[i+3] = 0;
-
-                f_red[i+3] = F(ix*hx, iy*hy);
-            }
+            f_red[i] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_red[i+1] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_red[i+2] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_red[i+3] = F((ix+1)*hx, (iy+1)*hy);
         }
         #pragma omp barrier
         #pragma omp for
         for (i=0; i<size; i+=4) {
-            ix = (int) i / (ny+1);
-            if (ix % 2 != 0) {
+            ix = (int) i / (ny-1);
+            if (ix % 2 == 0) {
                 ix = ix * 2;
-                ix += 0;
+                ix += (i % 2 == 0) ? 1 : 0;
             }
             else {
                 ix = ix * 2;
-                ix += 1;
+                ix += (i % 2 != 0) ? 1 : 0;
             }
-            iy = i % (ny+1);
+            iy = i % (ny-1);
 
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_black[i] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_black[i] = 0;
-
-                f_black[i] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_black[i+1] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_black[i+1] = 0;
-
-                f_black[i+1] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_black[i+2] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_black[i+2] = 0;
-
-                f_black[i+2] = F(ix*hx, iy*hy);
-            }
-
-            if (++iy == ny+1) {
-                ix += 2;
-                iy = 0;
-            }
-            else {
-                if (ix % 2 == 0)
-                    ix++;
-                else
-                    ix--;
-            }
-
-            if ((ix >= 0) && (ix <= nx) && (iy >= 0) && (iy <= ny)) {
-                if (iy == ny)
-                    grid_black[i+3] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
-                else
-                    grid_black[i+3] = 0;
-
-                f_black[i+3] = F(ix*hx, iy*hy);
-            }
+            f_black[i] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_black[i+1] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_black[i+2] = F((ix+1)*hx, (iy+1)*hy);
+            INCREMENT(ix, iy);
+            f_black[i+3] = F((ix+1)*hx, (iy+1)*hy);
         }
         #pragma omp barrier
 
@@ -349,248 +266,54 @@ void gauss() {
         for (it=0; it<num_iterations; ++it) {
             #pragma omp for
             for (i=0; i<size; i+=4) {
-                ix = (int) i / (ny+1);
+                ix = (int) i / (ny-1);
                 if (ix % 2 == 0) {
                     ix = ix * 2;
-                    ix += 0;
+                    ix += (i % 2 != 0) ? 1 : 0;
                 }
                 else {
                     ix = ix * 2;
-                    ix += 1;
+                    ix += (i % 2 == 0) ? 1 : 0;
                 }
-                iy = i % (ny+1);
+                iy = i % (ny-1);
 
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
+                sumv[0] = sum_neighbours(grid_black, i, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[1] = sum_neighbours(grid_black, i+1, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[2] = sum_neighbours(grid_black, i+2, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[3] = sum_neighbours(grid_black, i+3, ix, iy);
 
-                    if (ix % 2 == 0) {
-                        sum -= grid_black[i-(ny+1)] / (hx*hx);
-                        sum -= grid_black[i] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_black[i] / (hx*hx);
-                        sum -= grid_black[i+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_black[i-1] / (hy*hy);
-                    sum -= grid_black[i+1] / (hy*hy);
-
-                    grid_red[i] = (f_red[i] - sum) /
+                for (j=0; j<4; j++)
+                    grid_red[i+j] = (f_red[i+j] - sumv[j]) /
                         (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_black[(i+1)-(ny+1)] / (hx*hx);
-                        sum -= grid_black[(i+1)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_black[(i+1)] / (hx*hx);
-                        sum -= grid_black[(i+1)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_black[(i+1)-1] / (hy*hy);
-                    sum -= grid_black[(i+1)+1] / (hy*hy);
-
-                    grid_red[(i+1)] = (f_red[(i+1)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_black[(i+2)-(ny+1)] / (hx*hx);
-                        sum -= grid_black[(i+2)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_black[(i+2)] / (hx*hx);
-                        sum -= grid_black[(i+2)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_black[(i+2)-1] / (hy*hy);
-                    sum -= grid_black[(i+2)+1] / (hy*hy);
-
-                    grid_red[(i+2)] = (f_red[(i+2)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_black[(i+3)-(ny+1)] / (hx*hx);
-                        sum -= grid_black[(i+3)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_black[(i+3)] / (hx*hx);
-                        sum -= grid_black[(i+3)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_black[(i+3)-1] / (hy*hy);
-                    sum -= grid_black[(i+3)+1] / (hy*hy);
-
-                    grid_red[(i+3)] = (f_red[(i+3)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
             }
             #pragma omp barrier
             #pragma omp for
             for (i=0; i<size; i+=4) {
-                ix = (int) i / (ny+1);
-                if (ix % 2 != 0) {
+                ix = (int) i / (ny-1);
+                if (ix % 2 == 0) {
                     ix = ix * 2;
-                    ix += 0;
+                    ix += (i % 2 != 0) ? 0 : 1;
                 }
                 else {
                     ix = ix * 2;
-                    ix += 1;
+                    ix += (i % 2 == 0) ? 0 : 1;
                 }
-                iy = i % (ny+1);
+                iy = i % (ny-1);
 
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
+                sumv[0] = sum_neighbours(grid_red, i, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[1] = sum_neighbours(grid_red, i+1, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[2] = sum_neighbours(grid_red, i+2, ix, iy);
+                INCREMENT(ix, iy);
+                sumv[3] = sum_neighbours(grid_red, i+3, ix, iy);
 
-                    if (ix % 2 == 0) {
-                        sum -= grid_red[i-(ny+1)] / (hx*hx);
-                        sum -= grid_red[i] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_red[i] / (hx*hx);
-                        sum -= grid_red[i+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_red[i-1] / (hy*hy);
-                    sum -= grid_red[i+1] / (hy*hy);
-
-                    grid_black[i] = (f_black[i] - sum) /
+                for (j=0; j<4; j++)
+                    grid_black[i+j] = (f_black[i+j] - sumv[j]) /
                         (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_red[(i+1)-(ny+1)] / (hx*hx);
-                        sum -= grid_red[(i+1)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_red[(i+1)] / (hx*hx);
-                        sum -= grid_red[(i+1)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_red[(i+1)-1] / (hy*hy);
-                    sum -= grid_red[(i+1)+1] / (hy*hy);
-
-                    grid_black[(i+1)] = (f_black[(i+1)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_red[(i+2)-(ny+1)] / (hx*hx);
-                        sum -= grid_red[(i+2)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_red[(i+2)] / (hx*hx);
-                        sum -= grid_red[(i+2)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_red[(i+2)-1] / (hy*hy);
-                    sum -= grid_red[(i+2)+1] / (hy*hy);
-
-                    grid_black[(i+2)] = (f_black[(i+2)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-
-                if (++iy == ny+1) {
-                    ix += 2;
-                    iy = 0;
-                }
-                else {
-                    if (ix % 2 == 0)
-                        ix++;
-                    else
-                        ix--;
-                }
-
-                if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                    sum = 0;
-
-                    if (ix % 2 == 0) {
-                        sum -= grid_red[(i+3)-(ny+1)] / (hx*hx);
-                        sum -= grid_red[(i+3)] / (hx*hx);
-                    }
-                    else {
-                        sum -= grid_red[(i+3)] / (hx*hx);
-                        sum -= grid_red[(i+3)+(ny+1)] / (hx*hx);
-                    }
-
-                    sum -= grid_red[(i+3)-1] / (hy*hy);
-                    sum -= grid_red[(i+3)+1] / (hy*hy);
-
-                    grid_black[(i+3)] = (f_black[(i+3)] - sum) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
             }
             #pragma omp barrier
 
@@ -946,7 +669,12 @@ void gauss() {
             if ((ix < 0) || (ix > nx) || (iy < 0) || (iy > ny))
                 continue;
 
-            current_grid[ix*(ny+1) + iy] = grid_red[L(ix, iy)];
+            if ((ix == 0) || (iy == 0) || (ix == nx))
+                current_grid[ix*(ny+1) + iy] = 0;
+            else if (iy == ny)
+                current_grid[ix*(ny+1) + iy] = border[ix];
+            else
+                current_grid[ix*(ny+1) + iy] = grid_red[L(ix-1, iy-1)];
         }
     }
 
@@ -960,7 +688,12 @@ void gauss() {
             if ((ix < 0) || (ix > nx) || (iy < 0) || (iy > ny))
                 continue;
 
-            current_grid[ix*(ny+1) + iy] = grid_black[L(ix, iy)];
+            if ((ix == 0) || (iy == 0) || (ix == nx))
+                current_grid[ix*(ny+1) + iy] = 0;
+            else if (iy == ny)
+                current_grid[ix*(ny+1) + iy] = border[ix];
+            else
+                current_grid[ix*(ny+1) + iy] = grid_black[L(ix-1, iy-1)];
         }
     }
 }

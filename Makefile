@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O3 -Wall -Winline -Wshadow -fopenmp -lm -llikwid -fdump-tree-optimized -Wno-unused-variable -Wno-unused-but-set-variable
+CFLAGS = -O3 -Wall -Winline -Wshadow -fopenmp -lm
 BIN = rbgs
 
 all: $(BIN)

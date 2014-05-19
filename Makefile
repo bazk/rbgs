@@ -10,4 +10,4 @@ clean:
 rebuild: clean all
 
 $(BIN): rbgs.c
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) -o $@ $^ $(CFLAGS)

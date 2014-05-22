@@ -41,6 +41,8 @@
 #define INCREMENT(A, B) if (++B == ny-1) { A += 2; B = 0; } \
                         else { A += (A % 2 == 0) ? 1 : -1; }
 
+typedef double v2df __attribute__ ((vector_size (16)));
+
 int nx, ny, num_threads, num_iterations;
 double hx, hy;
 FILE *solution;
@@ -167,133 +169,143 @@ inline double sum_neighbours(double *grid, int i, int ix, int iy, double *border
 }
 
 void gauss() {
-    int ix, iy;
+    int ix, iy, bx, by;
+    int i;
     double residue, residue_sum, begin_time, end_time, value;
-    int size;
+    int size, size_x, size_y;
     int red;
 
-    double *grid_red, *grid_black, *f_red, *f_black;
+    v2df *grid_red, *grid_black, *f_red, *f_black;
     double *border;
+    double *grid_current;
 
     begin_time = omp_get_wtime();
 
-    size = ceil((nx-1) / 2.0) * (ny-1);
+    size_x = (int) ceil((nx-1) / 2.0);
+    size_y = (int) ceil((ny-1) / 2.0);
 
-    grid_red = (double*) malloc(size * sizeof(double));
-    grid_black = (double*) malloc(size * sizeof(double));
-    f_red = (double*) malloc(size * sizeof(double));
-    f_black = (double*) malloc(size * sizeof(double));
+    size = size_x * size_y;
+
+    grid_red = (v2df*) malloc(size * sizeof(v2df));
+    grid_black = (v2df*) malloc(size * sizeof(v2df));
+    f_red = (v2df*) malloc(size * sizeof(v2df));
+    f_black = (v2df*) malloc(size * sizeof(v2df));
 
     border = (double*) malloc((nx+1) * sizeof(double));
+    grid_current = (double*) malloc((nx+1) * (ny+1) * sizeof(double));
 
     for (ix=0; ix<(nx+1); ix++)
         border[ix] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
 
-    #pragma omp parallel private(ix, iy)
+    #pragma omp parallel private(ix, iy, bx, by, i)
     {
-        int it, i, j, from, to, chunk;
-        int from_ix_red, from_ix_black, from_iy;
-        double sum[4];
-        // double sum;
+        int it;
+        v2df sum;
 
-        chunk = ceil(size / (float) omp_get_num_threads());
-        from = chunk * omp_get_thread_num();
-        to = from + chunk;
-        if (to > size)
-            to = size;
+        #pragma omp for
+        for (i=0; i<size; ++i) {
+            bx = i / size_y;
+            by = i % size_y;
 
-        ix = (int) from / (ny-1);
-        from_ix_red = ix * 2;
-        from_ix_black = ix * 2;
-
-        if (ix % 2 == 0) {
-            if (from % 2 == 0)
-                from_ix_black += 1;
-            else
-                from_ix_red += 1;
-        }
-        else {
-            if (from % 2 == 0)
-                from_ix_red += 1;
-            else
-                from_ix_black += 1;
-        }
-
-        from_iy = from % (ny-1);
-
-        ix = from_ix_red;
-        iy = from_iy;
-        for (i=from; i<to; ++i) {
-            f_red[i] = F((ix+1)*hx, (iy+1)*hy);
-            INCREMENT(ix, iy);
-        }
-
-        ix = from_ix_black;
-        iy = from_iy;
-        for (i=from; i<to; ++i) {
-            f_black[i] = F((ix+1)*hx, (iy+1)*hy);
-            INCREMENT(ix, iy);
+            f_red[i][0] = F((2*bx+1)*hx, (2*by+1)*hy);
+            f_red[i][1] = F((2*bx+2)*hx, (2*by+2)*hy);
+            f_black[i][0] = F((2*bx+2)*hx, (2*by+1)*hy);
+            f_black[i][1] = F((2*bx+1)*hx, (2*by+2)*hy);
         }
 
         #pragma omp barrier
 
         for (it=0; it<num_iterations; ++it) {
-            ix = from_ix_red;
-            iy = from_iy;
-            i = from;
-            while (i<to) {
-                sum[0] = sum_neighbours(grid_black, i, ix, iy, border);
-                INCREMENT(ix, iy);
+            #pragma omp for
+            for (i=0; i<size; ++i) {
+                bx = i / size_y;
+                by = i % size_y;
 
-                sum[1] = sum_neighbours(grid_black, i+1, ix, iy, border);
-                INCREMENT(ix, iy);
+                sum[0] = 0;
+                sum[1] = 0;
 
-                sum[2] = sum_neighbours(grid_black, i+2, ix, iy, border);
-                INCREMENT(ix, iy);
+                ix = 2 * bx;
+                iy = 2 * by;
 
-                sum[3] = sum_neighbours(grid_black, i+3, ix, iy, border);
-                INCREMENT(ix, iy);
+                if (ix > 0)
+                    sum[0] -= grid_black[i-size_y][0] / (hx*hx);
 
-                grid_red[i] = (f_red[i] - sum[0]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_red[i+1] = (f_red[i+1] - sum[1]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_red[i+2] = (f_red[i+2] - sum[2]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_red[i+3] = (f_red[i+3] - sum[3]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                if (ix < (nx-2))
+                    sum[0] -= grid_black[i][0] / (hx*hx);
 
-                i += 4;
+                if (iy > 0)
+                    sum[0] -= grid_black[i-1][1] / (hy*hy);
+
+                if (iy < (ny-2))
+                    sum[0] -= grid_black[i][1] / (hy*hy);
+                else
+                    sum[0] -= border[ix+1] / (hy*hy);
+
+                ix = 2 * bx + 1;
+                iy = 2 * by + 1;
+
+                if (ix > 0)
+                    sum[1] -= grid_black[i][1] / (hx*hx);
+
+                if (ix < (nx-2))
+                    sum[1] -= grid_black[i+size_y][1] / (hx*hx);
+
+                if (iy > 0)
+                    sum[1] -= grid_black[i][0] / (hy*hy);
+
+                if (iy < (ny-2))
+                    sum[1] -= grid_black[i+1][0] / (hy*hy);
+                else
+                    sum[1] -= border[ix+1] / (hy*hy);
+
+                grid_red[i] = (f_red[i] - sum) / (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
             }
 
             #pragma omp barrier
 
-            ix = from_ix_black;
-            iy = from_iy;
-            i = from;
-            while (i<to) {
-                sum[0] = sum_neighbours(grid_red, i, ix, iy, border);
-                INCREMENT(ix, iy);
+            #pragma omp for
+            for (i=0; i<size; ++i) {
+                bx = i / size_y;
+                by = i % size_y;
 
-                sum[1] = sum_neighbours(grid_red, i+1, ix, iy, border);
-                INCREMENT(ix, iy);
+                sum[0] = 0;
+                sum[1] = 0;
 
-                sum[2] = sum_neighbours(grid_red, i+2, ix, iy, border);
-                INCREMENT(ix, iy);
+                ix = 2 * bx + 1;
+                iy = 2 * by;
 
-                sum[3] = sum_neighbours(grid_red, i+3, ix, iy, border);
-                INCREMENT(ix, iy);
+                if (ix > 0)
+                    sum[0] -= grid_red[i][0] / (hx*hx);
 
-                grid_black[i] = (f_black[i] - sum[0]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_black[i+1] = (f_black[i+1] - sum[1]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_black[i+2] = (f_black[i+2] - sum[2]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                grid_black[i+3] = (f_black[i+3] - sum[3]) /
-                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                if (ix < (nx-2))
+                    sum[0] -= grid_red[i+size_y][0] / (hx*hx);
 
-                i += 4;
+                if (iy > 0)
+                    sum[0] -= grid_red[i-1][1] / (hy*hy);
+
+                if (iy < (ny-2))
+                    sum[0] -= grid_red[i][1] / (hy*hy);
+                else
+                    sum[0] -= border[ix+1] / (hy*hy);
+
+                ix = 2 * bx;
+                iy = 2 * by + 1;
+
+                if (ix > 0)
+                    sum[1] -= grid_red[i-size_y][1] / (hx*hx);
+
+                if (ix < (nx-2))
+                    sum[1] -= grid_red[i][1] / (hx*hx);
+
+                if (iy > 0)
+                    sum[1] -= grid_red[i][0] / (hy*hy);
+
+                if (iy < (ny-2))
+                    sum[1] -= grid_red[i+1][0] / (hy*hy);
+                else
+                    sum[1] -= border[ix+1] / (hy*hy);
+
+                grid_black[i] = (f_black[i] - sum) / (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
             }
 
             #pragma omp barrier
@@ -302,35 +314,42 @@ void gauss() {
 
     end_time = omp_get_wtime();
 
-    residue = 0;
-    red = 1;
-    for (ix=0; ix<=nx; ++ix) {
-        for (iy=0; iy<=ny; ++iy) {
-            if ((ix == 0) || (iy == 0) || (ix == nx))
-                value = 0;
-            else if (iy == ny)
-                value = border[ix];
-            else if (red)
-                value = grid_red[L(ix-1, iy-1)];
-            else
-                value = grid_black[L(ix-1, iy-1)];
+    for (i=0; i<size; ++i) {
+        bx = i / size_y;
+        by = i % size_y;
 
+        grid_current[(2*bx+1)*(ny+1) + (2*by+1)] = grid_red[i][0];
+        grid_current[(2*bx+2)*(ny+1) + (2*by+2)] = grid_red[i][1];
+        grid_current[(2*bx+2)*(ny+1) + (2*by+1)] = grid_black[i][0];
+        grid_current[(2*bx+1)*(ny+1) + (2*by+2)] = grid_black[i][1];
+    }
+
+    for (ix=0; ix<(nx+1); ++ix) {
+        grid_current[ix*(ny+1) + 0] = 0;
+        grid_current[ix*(ny+1) + ny] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
+    }
+    for (iy=0; iy<(ny+1); ++iy) {
+        grid_current[0*(ny+1) + iy] = 0;
+        grid_current[nx*(ny+1) + iy] = 0;
+    }
+
+    residue = 0;
+    for (ix=0; ix<(nx+1); ++ix) {
+        for (iy=0; iy<(ny+1); ++iy) {
             if ((ix > 0) && (ix < nx) && (iy > 0) && (iy < ny)) {
-                if (red) {
-                    residue_sum = sum_neighbours(grid_black, L(ix-1, iy-1), ix-1, iy-1, border);
-                    residue_sum += grid_red[L(ix-1, iy-1)] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
-                else {
-                    residue_sum = sum_neighbours(grid_red, L(ix-1, iy-1), ix-1, iy-1, border);
-                    residue_sum += grid_black[L(ix-1, iy-1)] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
-                }
+                residue_sum = 0;
+
+                residue_sum -= grid_current[(ix-1)*(ny+1) + iy] / (hx*hx);
+                residue_sum -= grid_current[(ix+1)*(ny+1) + iy] / (hx*hx);
+                residue_sum -= grid_current[ix*(ny+1) + (iy-1)] / (hy*hy);
+                residue_sum -= grid_current[ix*(ny+1) + (iy+1)] / (hy*hy);
+
+                residue_sum += grid_current[ix*(ny+1) + iy] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
 
                 residue += pow(F(ix*hx, iy*hy) - residue_sum, 2);
             }
 
-            red = !red;
-
-            fprintf(solution, "%lf %lf %lf\n", ix*hx, iy*hy, value);
+            fprintf(solution, "%lf %lf %lf\n", ix*hx, iy*hy, grid_current[ix*(ny+1) + iy]);
         }
         fprintf(solution, "\n");
     }
@@ -343,6 +362,7 @@ void gauss() {
     free(f_red);
     free(f_black);
     free(border);
+    free(grid_current);
 }
 
 int main(int argc, char **argv) {

@@ -12,7 +12,7 @@
 
 #define K 2 * M_PI
 
-#define F(X, Y) 4 * M_PI * M_PI * sin(2 * M_PI * X) * sinh(2 * M_PI * Y)
+#define F(X, Y) 4 * M_PI * M_PI * sin(2 * M_PI * (X) * hx) * sinh(2 * M_PI * (Y) * hy)
 
 #define L(X, Y) ((int) (X) / 2) * (ny-1) + (Y)
 
@@ -37,6 +37,8 @@
 //                 X += (I % 2 != 0) ? 1 : 0;
 //             }
 //             Y = I % (ny-1);
+
+#define BORDER(X) sin(2*M_PI*((X)*hx)) * sinh(2*M_PI)
 
 #define INCREMENT(A, B) if (++B == ny-1) { A += 2; B = 0; } \
                         else { A += (A % 2 == 0) ? 1 : -1; }
@@ -76,7 +78,7 @@ void jacobi() {
         for (ix=1; ix<nx; ++ix) {
             for (iy=1; iy<ny; ++iy) {
                 grid_current[ix*(ny+1) + iy] = 0;
-                f[ix*(ny+1) + iy] = F(ix*hx, iy*hy);
+                f[ix*(ny+1) + iy] = F(ix, iy);
             }
         }
 
@@ -124,7 +126,7 @@ void jacobi() {
 
                 sum += grid_current[ix*(ny+1) + iy] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
 
-                residue += pow(F(ix*hx, iy*hy) - sum, 2);
+                residue += pow(F(ix, iy) - sum, 2);
             }
 
             fprintf(solution, "%lf %lf %lf\n", ix*hx, iy*hy, grid_current[ix*(ny+1) + iy]);
@@ -175,6 +177,8 @@ void gauss() {
     int size, size_x, size_y;
     int red;
 
+    int *correction_x, *correction_y;
+
     v2df coef, hx_sq, hy_sq;
     coef[0] = (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
     coef[1] = (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
@@ -185,13 +189,12 @@ void gauss() {
     hy_sq[1] = hy * hy;
 
     v2df *grid_red, *grid_black, *f_red, *f_black;
-    double *border;
     double *grid_current;
 
     begin_time = omp_get_wtime();
 
-    size_x = (int) ceil((nx-1) / 2.0);
-    size_y = (int) ceil((ny-1) / 2.0);
+    size_x = (int) ceil((nx-1) / 2.0) + 2;
+    size_y = (int) ceil((ny-1) / 2.0) + 2;
 
     size = size_x * size_y;
 
@@ -200,11 +203,10 @@ void gauss() {
     f_red = (v2df*) malloc(size * sizeof(v2df));
     f_black = (v2df*) malloc(size * sizeof(v2df));
 
-    border = (double*) malloc((nx+1) * sizeof(double));
     grid_current = (double*) malloc((nx+1) * (ny+1) * sizeof(double));
 
-    for (ix=0; ix<(nx+1); ix++)
-        border[ix] = sin(2*M_PI*(ix*hx)) * sinh(2*M_PI);
+    correction_x = (int*) malloc(size_x * sizeof(int));
+    correction_y = (int*) malloc(size_y * sizeof(int));
 
     #pragma omp parallel private(ix, iy, bx, by, i)
     {
@@ -212,109 +214,87 @@ void gauss() {
         v2df sumx, sumy;
 
         #pragma omp for
-        for (i=0; i<size; ++i) {
-            bx = i / size_y;
-            by = i % size_y;
+        for (bx = 1; bx < size_x-1; ++bx) {
+            for (by = 1; by < size_y-1; ++by) {
+                i = bx * size_y + by;
 
-            f_red[i][0] = F((2*bx+1)*hx, (2*by+1)*hy);
-            f_red[i][1] = F((2*bx+2)*hx, (2*by+2)*hy);
-            f_black[i][0] = F((2*bx+2)*hx, (2*by+1)*hy);
-            f_black[i][1] = F((2*bx+1)*hx, (2*by+2)*hy);
+                if (by == 1) {
+                    correction_x[bx] = 0;
+                    if ((nx % 2 == 0) && (2*bx == nx))
+                        correction_x[bx] = size_y;
+                }
+
+                correction_y[by] = 0;
+                if ((ny % 2 == 0) && (2*by == ny))
+                    correction_y[by] = 1;
+
+                if (bx == 0) {
+                    grid_red[i-size_y][0]   = 0;
+                    grid_red[i-size_y][1]   = 0;
+                    grid_black[i-size_y][0] = 0;
+                    grid_black[i-size_y][1] = 0;
+                }
+                else if (bx == size_x-2) {
+                    grid_red[i+size_y][0]   = 0;
+                    grid_red[i+size_y][1]   = 0;
+                    grid_black[i+size_y][0] = 0;
+                    grid_black[i+size_y][1] = 0;
+                }
+
+                if (by == 0) {
+                    grid_red[i-1][0]   = 0;
+                    grid_red[i-1][1]   = 0;
+                    grid_black[i-1][0] = 0;
+                    grid_black[i-1][1] = 0;
+                }
+                else if (by == size_y-2) {
+                    grid_red[i+1][0] = grid_black[i+1][1] = BORDER(2*bx-1);
+                    grid_red[i+1][1] = grid_black[i+1][0] = BORDER(2*bx);
+                }
+
+                grid_red[i][0]   = 0;
+                grid_red[i][1]   = 0;
+                grid_black[i][0] = 0;
+                grid_black[i][1] = 0;
+
+                f_red[i][0]   = F(2*bx-1, 2*by-1);
+                f_red[i][1]   = F(2*bx,   2*by);
+                f_black[i][0] = F(2*bx,   2*by-1);
+                f_black[i][1] = F(2*bx-1, 2*by);
+            }
         }
 
         #pragma omp barrier
 
         for (it=0; it<num_iterations; ++it) {
             #pragma omp for
-            for (i=0; i<size; ++i) {
-                __builtin_prefetch(&grid_red[i], 1, 0);
-                __builtin_prefetch(&f_red[i], 0, 0);
-                __builtin_prefetch(&grid_black[i], 0, 3);
+            for (bx = 1; bx < size_x-1; ++bx) {
+                for (by = 1; by < size_y-1; ++by) {
+                    i = bx * size_y + by;
 
-                bx = i / size_y;
-                by = i % size_y;
+                    sumx[0] = grid_black[i-size_y][0] + grid_black[i+correction_x[bx]][0];
+                    sumx[1] = grid_black[i][1] + grid_black[i+size_y][1];
+                    sumy[0] = grid_black[i-1][1] + grid_black[i+correction_y[by]][1];
+                    sumy[1] = grid_black[i][0] + grid_black[i+1][0];
 
-                ix = 2 * bx;
-                iy = 2 * by;
-
-                sumx[0] = 0;
-                sumx[1] = 0;
-                sumy[0] = 0;
-                sumy[1] = 0;
-
-                if (ix > 0)
-                    sumx[0] += grid_black[i-size_y][0];
-                if (ix < (nx-2))
-                    sumx[0] += grid_black[i][0];
-
-                if (iy > 0)
-                    sumy[0] += grid_black[i-1][1];
-                if (iy < (ny-2))
-                    sumy[0] += grid_black[i][1];
-                else
-                    sumy[0] += border[ix+1];
-
-                ix = 2 * bx + 1;
-                iy = 2 * by + 1;
-
-                sumx[1] += grid_black[i][1];
-                if (ix < (nx-2))
-                    sumx[1] += grid_black[i+size_y][1];
-
-                sumy[1] += grid_black[i][0];
-                if (iy < (ny-2))
-                    sumy[1] += grid_black[i+1][0];
-                else
-                    sumy[1] += border[ix+1];
-
-                grid_red[i] = (f_red[i] + sumx / hx_sq + sumy / hy_sq) / coef;
+                    grid_red[i] = (f_red[i] + sumx / hx_sq + sumy / hy_sq) / coef;
+                }
             }
 
             #pragma omp barrier
 
             #pragma omp for
-            for (i=0; i<size; ++i) {
-                __builtin_prefetch(&grid_black[i], 1, 0);
-                __builtin_prefetch(&f_black[i], 0, 0);
-                __builtin_prefetch(&grid_red[i], 0, 3);
+            for (bx = 1; bx < size_x-1; ++bx) {
+                for (by = 1; by < size_y-1; ++by) {
+                    i = bx * size_y + by;
 
-                bx = i / size_y;
-                by = i % size_y;
+                    sumx[0] = grid_red[i][0] + grid_red[i+size_y][0];
+                    sumx[1] = grid_red[i-size_y][1] + grid_red[i+correction_x[bx]][1];
+                    sumy[0] = grid_red[i-1][1] + grid_red[i+correction_y[by]][1];
+                    sumy[1] = grid_red[i][0] + grid_red[i+1][0];
 
-                sumx[0] = 0;
-                sumx[1] = 0;
-                sumy[0] = 0;
-                sumy[1] = 0;
-
-                ix = 2 * bx + 1;
-                iy = 2 * by;
-
-                sumx[0] += grid_red[i][0];
-                if (ix < (nx-2))
-                    sumx[0] += grid_red[i+size_y][0];
-
-                if (iy > 0)
-                    sumy[0] += grid_red[i-1][1];
-                if (iy < (ny-2))
-                    sumy[0] += grid_red[i][1];
-                else
-                    sumy[0] += border[ix+1];
-
-                ix = 2 * bx;
-                iy = 2 * by + 1;
-
-                if (ix > 0)
-                    sumx[1] += grid_red[i-size_y][1];
-                if (ix < (nx-2))
-                    sumx[1] += grid_red[i][1];
-
-                sumy[1] += grid_red[i][0];
-                if (iy < (ny-2))
-                    sumy[1] += grid_red[i+1][0];
-                else
-                    sumy[1] += border[ix+1];
-
-                grid_black[i] = (f_black[i] + sumx / hx_sq + sumy / hy_sq) / coef;
+                    grid_black[i] = (f_black[i] + sumx / hx_sq + sumy / hy_sq) / coef;
+                }
             }
 
             #pragma omp barrier
@@ -323,14 +303,15 @@ void gauss() {
 
     end_time = omp_get_wtime();
 
-    for (i=0; i<size; ++i) {
-        bx = i / size_y;
-        by = i % size_y;
+    for (bx = 1; bx < size_x-1; ++bx) {
+        for (by = 1; by < size_y-1; ++by) {
+            i = bx * size_y + by;
 
-        grid_current[(2*bx+1)*(ny+1) + (2*by+1)] = grid_red[i][0];
-        grid_current[(2*bx+2)*(ny+1) + (2*by+2)] = grid_red[i][1];
-        grid_current[(2*bx+2)*(ny+1) + (2*by+1)] = grid_black[i][0];
-        grid_current[(2*bx+1)*(ny+1) + (2*by+2)] = grid_black[i][1];
+            grid_current[(2*bx-1)*(ny+1) + (2*by-1)] = grid_red[i][0];
+            grid_current[(2*bx)*(ny+1)   + (2*by)  ] = grid_red[i][1];
+            grid_current[(2*bx)*(ny+1)   + (2*by-1)] = grid_black[i][0];
+            grid_current[(2*bx-1)*(ny+1) + (2*by)  ] = grid_black[i][1];
+        }
     }
 
     for (ix=0; ix<(nx+1); ++ix) {
@@ -355,7 +336,7 @@ void gauss() {
 
                 residue_sum += grid_current[ix*(ny+1) + iy] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
 
-                residue += pow(F(ix*hx, iy*hy) - residue_sum, 2);
+                residue += pow(F(ix, iy) - residue_sum, 2);
             }
 
             fprintf(solution, "%lf %lf %lf\n", ix*hx, iy*hy, grid_current[ix*(ny+1) + iy]);
@@ -370,7 +351,6 @@ void gauss() {
     free(grid_black);
     free(f_red);
     free(f_black);
-    free(border);
     free(grid_current);
 }
 

@@ -14,6 +14,7 @@
 #define F(X, Y) 4 * M_PI * M_PI * sin(2 * M_PI * (X) * hx) * sinh(2 * M_PI * (Y) * hy)
 #define BORDER(X) sin(2*M_PI*((X)*hx)) * sinh(2*M_PI)
 #define IDX(X, Y) (X) * size_y + (Y)
+#define IDX2(X, Y) ((int) ((X) / 2.0)) * size_y + (Y)
 
 #ifndef PADDING
 #define PADDING 16 // array padding to avoid cache thrashing
@@ -122,7 +123,363 @@ void jacobi() {
     free(f);
 }
 
-void gauss() {
+void gauss_v1() {
+    int it, x, y, yy;
+    int size_x, size_y;
+    double residue, sum;
+    double begin_time, end_time;
+    double *f;
+    double *grid_current;
+
+    size_x = nx+1;
+    size_y = ny+1;
+
+    grid_current = (double*) malloc(size_x * size_y * sizeof(double));
+    f = (double*) malloc(size_x * size_y * sizeof(double));
+
+    for (x=0; x<(nx+1); ++x) {
+        grid_current[IDX(x, 0)] = 0;
+        grid_current[IDX(x, ny)] = BORDER(x);
+    }
+    for (y=0; y<(ny+1); ++y) {
+        grid_current[IDX(0, y)] = 0;
+        grid_current[IDX(nx, y)] = 0;
+    }
+
+    begin_time = omp_get_wtime();
+
+    #pragma omp parallel private(it, x, y, yy, sum)
+    {
+        #pragma omp for
+        for (x=1; x<nx; ++x) {
+            for (yy=1; yy<ny; yy+=2) {
+                if (x % 2 == 0)
+                    y = yy;
+                else
+                    y = yy + 1;
+
+                if (y >= ny)
+                    continue;
+
+                grid_current[IDX(x, y)] = 0;
+                f[IDX(x, y)] = F(x, y);
+            }
+        }
+
+        #pragma omp for
+        for (x=1; x<nx; ++x) {
+            for (yy=1; yy<ny; yy+=2) {
+                if (x % 2 == 0)
+                    y = yy + 1;
+                else
+                    y = yy;
+
+                if (y >= ny)
+                    continue;
+
+                grid_current[IDX(x, y)] = 0;
+                f[IDX(x, y)] = F(x, y);
+            }
+        }
+
+        #pragma omp barrier
+
+        for (it=0; it<num_iterations; ++it) {
+            #pragma omp for
+            for (x=1; x<nx; ++x) {
+                for (yy=1; yy<ny; yy+=2) {
+                    if (x % 2 == 0)
+                        y = yy;
+                    else
+                        y = yy + 1;
+
+                    if (y >= ny)
+                        continue;
+
+                    sum = 0;
+
+                    sum -= grid_current[IDX(x-1, y)] / (hx*hx);
+                    sum -= grid_current[IDX(x+1, y)] / (hx*hx);
+                    sum -= grid_current[IDX(x, y-1)] / (hy*hy);
+                    sum -= grid_current[IDX(x, y+1)] / (hy*hy);
+
+                    grid_current[IDX(x, y)] = (f[IDX(x, y)] - sum) /
+                                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                }
+            }
+
+            #pragma omp barrier
+
+            #pragma omp for
+            for (x=1; x<nx; ++x) {
+                for (yy=1; yy<ny; yy+=2) {
+                    if (x % 2 == 0)
+                        y = yy + 1;
+                    else
+                        y = yy;
+
+                    if (y >= ny)
+                        continue;
+
+                    sum = 0;
+
+                    sum -= grid_current[IDX(x-1, y)] / (hx*hx);
+                    sum -= grid_current[IDX(x+1, y)] / (hx*hx);
+                    sum -= grid_current[IDX(x, y-1)] / (hy*hy);
+                    sum -= grid_current[IDX(x, y+1)] / (hy*hy);
+
+                    grid_current[IDX(x, y)] = (f[IDX(x, y)] - sum) /
+                                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                }
+            }
+
+            #pragma omp barrier
+        }
+    }
+
+    end_time = omp_get_wtime();
+
+    residue = 0;
+    for (x=0; x<(nx+1); ++x) {
+        for (y=0; y<(ny+1); ++y) {
+            if ((x > 0) && (x < nx) && (y > 0) && (y < ny)) {
+                sum = 0;
+
+                sum -= grid_current[(x-1)*(ny+1) + y] / (hx*hx);
+                sum -= grid_current[(x+1)*(ny+1) + y] / (hx*hx);
+                sum -= grid_current[x*(ny+1) + (y-1)] / (hy*hy);
+                sum -= grid_current[x*(ny+1) + (y+1)] / (hy*hy);
+
+                sum += grid_current[x*(ny+1) + y] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+
+                residue += pow(F(x, y) - sum, 2);
+            }
+
+            fprintf(solution, "%lf %lf %lf\n", x*hx, y*hy, grid_current[x*(ny+1) + y]);
+        }
+        fprintf(solution, "\n");
+    }
+
+    printf("Tempo total de processamento: %lf segundos\n", end_time-begin_time);
+    printf("Norma L2 do resíduo: %lf\n", sqrt(residue));
+
+    free(grid_current);
+    free(f);
+}
+
+void gauss_v2() {
+    int it, x, y, xx, idx;
+    int size_x, size_y;
+    double residue, sum;
+    double begin_time, end_time;
+    double *grid_red, *grid_black, *f_red, *f_black;
+    double *grid_current;
+
+    size_x = (int) ceil((nx+1) / 2.0);
+    size_y = ny+1;
+
+    grid_red = (double*) malloc(size_x * size_y * sizeof(double));
+    grid_black = (double*) malloc(size_x * size_y * sizeof(double));
+    f_red = (double*) malloc(size_x * size_y * sizeof(double));
+    f_black = (double*) malloc(size_x * size_y * sizeof(double));
+
+    begin_time = omp_get_wtime();
+
+    #pragma omp parallel private(it, x, y, xx, idx, sum)
+    {
+        #pragma omp for
+        for (xx=1; xx<nx; xx+=2) {
+            for (y=1; y<ny; ++y) {
+                if (y % 2 == 0)
+                    x = xx + 1;
+                else
+                    x = xx;
+
+                if (x >= nx)
+                    continue;
+
+                if (x == 1) {
+                    grid_black[IDX2(x-1, y)] = 0;
+                }
+                else if (x == nx-1) {
+                    grid_black[IDX2(x+1, y)] = 0;
+                }
+
+                if (y == 1) {
+                    grid_black[IDX2(x, y-1)] = 0;
+                }
+                else if (y == ny-1) {
+                    grid_black[IDX2(x, y+1)] = BORDER(x);
+                }
+
+                idx = IDX2(x, y);
+
+                grid_red[idx] = 0;
+                f_red[idx] = F(x, y);
+            }
+        }
+
+        #pragma omp for
+        for (xx=1; xx<nx; xx+=2) {
+            for (y=1; y<ny; ++y) {
+                if (y % 2 == 0)
+                    x = xx;
+                else
+                    x = xx + 1;
+
+                if (x >= nx)
+                    continue;
+
+                if (x == 1) {
+                    grid_red[IDX2(x-1, y)] = 0;
+                }
+                else if (x == nx-1) {
+                    grid_red[IDX2(x+1, y)] = 0;
+                }
+
+                if (y == 1) {
+                    grid_red[IDX2(x, y-1)] = 0;
+                }
+                else if (y == ny-1) {
+                    grid_red[IDX2(x, y+1)] = BORDER(x);
+                }
+
+                idx = IDX2(x, y);
+
+                grid_black[idx] = 0;
+                f_black[idx] = F(x, y);
+            }
+        }
+
+        #pragma omp barrier
+
+        for (it=0; it<num_iterations; ++it) {
+            #pragma omp for
+            for (xx=1; xx<nx; xx+=2) {
+                for (y=1; y<ny; ++y) {
+                    if (y % 2 == 0)
+                        x = xx + 1;
+                    else
+                        x = xx;
+
+                    if (x >= nx)
+                        continue;
+
+                    idx = IDX2(x, y);
+
+                    sum = 0;
+
+                    if (x % 2 == 0) {
+                        sum -= grid_black[idx-size_y] / (hx*hx);
+                        sum -= grid_black[idx] / (hx*hx);
+                    }
+                    else {
+                        sum -= grid_black[idx] / (hx*hx);
+                        sum -= grid_black[idx+size_y] / (hx*hx);
+                    }
+
+                    sum -= grid_black[idx-1] / (hy*hy);
+                    sum -= grid_black[idx+1] / (hy*hy);
+
+                    grid_red[idx] = (f_red[idx] - sum) /
+                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                }
+            }
+
+            #pragma omp barrier
+
+            #pragma omp for
+            for (xx=1; xx<nx; xx+=2) {
+                for (y=1; y<ny; ++y) {
+                    if (y % 2 == 0)
+                        x = xx;
+                    else
+                        x = xx + 1;
+
+                    if (x >= nx)
+                        continue;
+
+                    idx = IDX2(x, y);
+
+                    sum = 0;
+
+                    if (x % 2 == 0) {
+                        sum -= grid_red[idx-size_y] / (hx*hx);
+                        sum -= grid_red[idx] / (hx*hx);
+                    }
+                    else {
+                        sum -= grid_red[idx] / (hx*hx);
+                        sum -= grid_red[idx+size_y] / (hx*hx);
+                    }
+
+                    sum -= grid_red[idx-1] / (hy*hy);
+                    sum -= grid_red[idx+1] / (hy*hy);
+
+                    grid_black[idx] = (f_black[idx] - sum) /
+                        (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+                }
+            }
+
+            #pragma omp barrier
+        }
+    }
+
+    end_time = omp_get_wtime();
+
+    grid_current = (double*) malloc((nx+1) * (ny+1) * sizeof(double));
+
+    for (xx=0; xx<nx+1; xx+=2) {
+        for (y=0; y<ny+1; ++y) {
+            if (y % 2 == 0)
+                x = xx;
+            else
+                x = xx + 1;
+
+            if (x <= nx)
+                grid_current[IDX(x, y)] = grid_red[IDX2(x, y)];
+
+            if (y % 2 == 0)
+                x = xx + 1;
+            else
+                x = xx;
+
+            if (x <= nx)
+                grid_current[IDX(x, y)] = grid_black[IDX2(x, y)];
+        }
+    }
+
+    residue = 0;
+    for (x=0; x<(nx+1); ++x) {
+        for (y=0; y<(ny+1); ++y) {
+            if ((x > 0) && (x < nx) && (y > 0) && (y < ny)) {
+                sum = 0;
+
+                sum -= grid_current[(x-1)*(ny+1) + y] / (hx*hx);
+                sum -= grid_current[(x+1)*(ny+1) + y] / (hx*hx);
+                sum -= grid_current[x*(ny+1) + (y-1)] / (hy*hy);
+                sum -= grid_current[x*(ny+1) + (y+1)] / (hy*hy);
+
+                sum += grid_current[x*(ny+1) + y] * (2 / (hx*hx) + 2 / (hy*hy) + (K*K));
+
+                residue += pow(F(x, y) - sum, 2);
+            }
+
+            fprintf(solution, "%lf %lf %lf\n", x*hx, y*hy, grid_current[x*(ny+1) + y]);
+        }
+        fprintf(solution, "\n");
+    }
+
+    printf("Tempo total de processamento: %lf segundos\n", end_time-begin_time);
+    printf("Norma L2 do resíduo: %lf\n", sqrt(residue));
+
+    free(grid_current);
+    free(grid_red);
+    free(grid_black);
+    free(f_red);
+    free(f_black);
+}
+
+void gauss_v3() {
     int it, x, y, bx, by, idx;
     int size_x, size_y;
     double residue, sum;
@@ -261,7 +618,7 @@ void gauss() {
 
     for (x=0; x<(nx+1); ++x) {
         grid_current[x*(ny+1) + 0] = 0;
-        grid_current[x*(ny+1) + ny] = sin(2*M_PI*(x*hx)) * sinh(2*M_PI);
+        grid_current[x*(ny+1) + ny] = BORDER(x);
     }
     for (y=0; y<(ny+1); ++y) {
         grid_current[0*(ny+1) + y] = 0;
@@ -342,7 +699,9 @@ int main(int argc, char **argv) {
         jacobi();
         break;
     case 'g':
-        gauss();
+        // gauss_v1();
+        // gauss_v2();
+        gauss_v3();
         break;
     default:
         fprintf(stderr, "error: '%s' is not a valid calculation method (valid options are 'j' for Jacobi or 'g' for Gauss-Seidel)\n", argv[5]);

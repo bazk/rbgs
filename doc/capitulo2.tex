@@ -35,7 +35,7 @@ Como o cálculo da função $f(x, y)$ é realizado múltiplas vezes para os mesm
         \label{subfig:efficiency-v1}
     \end{minipage}%
 
-    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 1}.}
+    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 1} (200 iterações por execução).}
     \label{fig:perf-v1}
 \end{figure}
 
@@ -71,7 +71,7 @@ Para fazer melhor uso da \textit{cache}, o \textit{grid} é dividido em dois vet
         \label{subfig:efficiency-v2}
     \end{minipage}%
 
-    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 2}.}
+    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 2} (200 iterações por execução).}
     \label{fig:perf-v2}
 \end{figure}
 
@@ -95,11 +95,20 @@ Com isso em mente, podemos representar em uma única posição de um vetor o val
     \label{fig:grid-v3}
 \end{figure}
 
-Como mostra a Figura ?, o cálculo é feito simultaneamente para dois pontos que têm dois vizinhos em comum reduzindo o acesso à memória em geral. Note também que o acesso aos vetores continua sendo sequencial -- como na versão anterior -- fazendo bom uso da cache.
+Como mostra a Figura \ref{fig:grid-calc}, o cálculo é feito simultaneamente para dois pontos que têm dois vizinhos em comum no \textit{stencil} reduzindo o acesso à memória em geral. Note também que o acesso aos vetores continua sendo sequencial -- como na versão anterior -- fazendo bom uso da cache. Ao contrário da versão anterior, o cálculo do índice ($i$) de uma dupla de pontos consecutivos é simples e envolve apenas duas operações aritméticas (nenhum desvio condicional).
 
-Ao contrário da versão anterior, o cálculo do índice ($i$) de uma dupla de pontos consecutivos é simples e envolve apenas duas operações aritméticas (nenhum desvio condicional).
+\begin{figure}[h]
+    \centering
+    \begin{minipage}{.6\textwidth}
+    \includegraphics[width=.9\textwidth]{figures/grid-calc}
+    \end{minipage}%
+    \begin{minipage}{.4\textwidth}
+    \caption{Exemplo de cálculo de dois pontos na \textbf{versão 3} do Red-Black Gauss-Seidel. Os dois pontos que estão localizados no índice 4 do vetor preto são calculados simultaneamente. Note que os dois pontos vermelhos de índice 4 são vizinhos no \textit{stencil} de ambos os pontos pretos e, logo, para sua leitura é necessário apenas uma busca na memória. Se os pontos pretos fossem calculados individualmente como nas versões anteriores, duas buscas na memória se fazem necessárias (uma leitura para cada ponto preto).}
+    \label{fig:grid-calc}
+    \end{minipage}%
+\end{figure}
 
-A leitura dos pontos $u(x, y+1)$ e $u(x+1, y)$ (ambos necessários para o cálculo do ponto $u(x, y)$) podem, dependendo do tamanho da dimensão $y$, coincidir na mesma posição da cache ocasionando aumento de \textit{cache misses}. Esse problema é conhecido como \textit{cache thrashing} \cite{cachethrashing} e para evitá-lo adiciona-se um \textit{padding}, ou seja, posições vazias na dimensão $y$. A Figura \ref{fig:padding} mostra a razão entre \textit{cache misses} e \textit{cache access} para diversos tamanho de \textit{grid} e tamanhos de \textit{padding}. O tamanho de \textit{padding} escolhido foi 16 já que este apresenta o menor número de \textit{cache misses} e acima deste valor não é apresentado nenhum ganho.
+A leitura dos pontos $u(x, y+1)$ e $u(x+1, y)$ (ambos necessários para o cálculo do ponto $u(x, y)$) podem, dependendo do tamanho da dimensão $y$, coincidir na mesma posição da cache ocasionando aumento de \textit{cache misses}. Esse problema é conhecido como \textit{cache thrashing} \cite{cachethrashing} e para evitá-lo adiciona-se um \textit{padding}, ou seja, posições vazias na dimensão $y$ a fim de que as posições acessadas não caiam na mesma posição da cache. A Figura \ref{fig:padding} mostra a razão entre \textit{cache misses} e \textit{cache access} para diversos tamanho de \textit{grid} e tamanhos de \textit{padding}. O tamanho de \textit{padding} escolhido foi 16 já que este apresenta o menor número de \textit{cache misses} e acima deste valor não é apresentado nenhum ganho.
 
 \begin{figure}[h]
     \centering
@@ -129,7 +138,7 @@ A leitura dos pontos $u(x, y+1)$ e $u(x+1, y)$ (ambos necessários para o cálcu
         \label{subfig:efficiency-v3}
     \end{minipage}%
 
-    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 3}.}
+    \caption{Gráficos do tempo de execução (a), \textit{speedup} (b) e eficiência paralela (c) a partir da média de 30 execuções do Red-Black Gauss-Seidel \textbf{versão 3} (200 iterações por execução).}
     \label{fig:perf-v3}
 \end{figure}
 

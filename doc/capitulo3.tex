@@ -1,6 +1,8 @@
 \chapter{Conclusão}
 \label{cha:conclusao}
 
-Em todos as implementações nota-se que a partir de 4 \textit{threads} a eficiência começa a reduzir. Acredito que isso se dá pelo número de acessos aos dados em relação ao processamento dos mesmos. Para um número mair de \textit{threads}, mesmo com um bom uso de cache, o tempo de processamento é pouco para esconder a latência do acesso aos dados.
+Em todos as implementações nota-se que a partir de 4 \textit{threads} a eficiência começa a reduzir. Acredito que isso se dá pelo número de acessos aos dados em relação ao processamento dos mesmos. Para um número maior de \textit{threads}, mesmo com um bom uso de cache, o tempo de processamento é pouco para esconder a latência do acesso aos dados.
+
+Também é possível notar que para \textit{grids} pequenos -- nesse caso, 32x32 ou 33x33 -- o \textit{speedup} é negativo, ou seja, quanto mais \textit{threads}, mais longo é o tempo de execução. Acredito seja consequência do \textit{overhead} -- principalmente sincronia -- que o paralelismo adiciona e acaba consumindo uma porção muito grande do tempo de execução para \textit{grids} pequenos.
 
 A escolha da versão a ser entregue é a \textbf{versão 3} pois é a que resultou em melhor desempenho, tanto sequencial quanto paralelo.

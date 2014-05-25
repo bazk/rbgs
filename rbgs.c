@@ -13,6 +13,8 @@
 #define K 2 * M_PI
 #define F(X, Y) 4 * M_PI * M_PI * sin(2 * M_PI * (X) * hx) * sinh(2 * M_PI * (Y) * hy)
 #define BORDER(X) sin(2*M_PI*((X)*hx)) * sinh(2*M_PI)
+
+// Grid to array conversion functions
 #define IDX(X, Y) (X) * size_y + (Y)
 #define IDX2(X, Y) ((int) ((X) / 2.0)) * size_y + (Y)
 
@@ -20,12 +22,24 @@
 #define PADDING 16 // array padding to avoid cache thrashing
 #endif
 
+#ifndef GAUSS_VERSION
+#define GAUSS_VERSION 3 // version of the Red-Black Gauss-Seidel implementation to use
+#endif
+
+// double2 is a type that holds two doubles (like double2 in OpenCL or CUDA).
+//
+// vector_size(16) means: use 16 bytes to represent as many double types as possible.
+// Since sizeof(double) == 8, double2 holds 2 double types.
 typedef double double2 __attribute__ ((vector_size (16)));
 
+// global variables
 int nx, ny, num_threads, num_iterations;
 double hx, hy;
 FILE *solution;
 
+// Método Jacobi
+//
+// Implementação simples do método Jacobi paralelo.
 void jacobi() {
     int it, x, y;
     int size_x, size_y;
@@ -39,24 +53,29 @@ void jacobi() {
     grid_next = (double*) malloc(size_x * size_y * sizeof(double));
     f = (double*) malloc(size_x * size_y * sizeof(double));
 
-    // initialize grid borders
-    for (x=0; x<size_x; ++x) {
-        grid_current[IDX(x, 0)] = grid_next[IDX(x, 0)] = 0;
-        grid_current[IDX(x, ny)] = grid_next[IDX(x, ny)] = BORDER(x);
-    }
-    for (y=0; y<size_y; ++y) {
-        grid_current[IDX(0, y)] = grid_next[IDX(0, y)] = 0;
-        grid_current[IDX(nx, y)] = grid_next[IDX(nx, y)] = 0;
-    }
-
     begin_time = omp_get_wtime();
 
     #pragma omp parallel private(it, x, y, sum)
     {
-        // initialize grid and f
+        // proper parallel initialization of the grid and f
         #pragma omp for
         for (x=1; x<nx; ++x) {
             for (y=1; y<ny; ++y) {
+
+                // initialize grid borders
+                if (x == 1) {
+                    grid_current[IDX(x-1, y)] = grid_next[IDX(x-1, y)] = 0;
+                }
+                else if (x == nx-1) {
+                    grid_current[IDX(x+1, y)] = grid_next[IDX(x+1, y)] = 0;
+                }
+                if (y == 1) {
+                    grid_current[IDX(x, y-1)] = grid_next[IDX(x, y-1)] = 0;
+                }
+                else if (y == ny-1) {
+                    grid_current[IDX(x, y+1)] = grid_next[IDX(x, y+1)] = BORDER(x);
+                }
+
                 grid_current[IDX(x, y)] = 0;
                 f[IDX(x, y)] = F(x, y);
             }
@@ -89,11 +108,14 @@ void jacobi() {
                 grid_current = grid_next;
                 grid_next = tmp;
             }
+
+            #pragma omp barrier
         }
     }
 
     end_time = omp_get_wtime();
 
+    // Calculate residue and output solution
     residue = 0;
     for (x=0; x<size_x; ++x) {
         for (y=0; y<size_y; ++y) {
@@ -123,6 +145,11 @@ void jacobi() {
     free(f);
 }
 
+#if GAUSS_VERSION == 1
+// Método Red-Black Gauss-Seidel Versão 1
+//
+// Implementação paralela do algoritmo Red-Black Gauss-Seidel com
+// mapeamento direto do grid em um vetor.
 void gauss_v1() {
     int it, x, y, yy;
     int size_x, size_y;
@@ -137,6 +164,7 @@ void gauss_v1() {
     grid_current = (double*) malloc(size_x * size_y * sizeof(double));
     f = (double*) malloc(size_x * size_y * sizeof(double));
 
+    // Initialize borders
     for (x=0; x<(nx+1); ++x) {
         grid_current[IDX(x, 0)] = 0;
         grid_current[IDX(x, ny)] = BORDER(x);
@@ -150,6 +178,7 @@ void gauss_v1() {
 
     #pragma omp parallel private(it, x, y, yy, sum)
     {
+        // Proper parallel initialization of grid and f
         #pragma omp for
         for (x=1; x<nx; ++x) {
             for (yy=1; yy<ny; yy+=2) {
@@ -165,7 +194,6 @@ void gauss_v1() {
                 f[IDX(x, y)] = F(x, y);
             }
         }
-
         #pragma omp for
         for (x=1; x<nx; ++x) {
             for (yy=1; yy<ny; yy+=2) {
@@ -239,6 +267,7 @@ void gauss_v1() {
 
     end_time = omp_get_wtime();
 
+    // Calculate residue and output solution
     residue = 0;
     for (x=0; x<(nx+1); ++x) {
         for (y=0; y<(ny+1); ++y) {
@@ -266,7 +295,13 @@ void gauss_v1() {
     free(grid_current);
     free(f);
 }
+#endif
 
+#if GAUSS_VERSION == 2
+// Método Red-Black Gauss-Seidel Versão 2
+//
+// Implementação paralela do algoritmo Red-Black Gauss-Seidel com
+// mapeamento do grid em dois vetores: red e black.
 void gauss_v2() {
     int it, x, y, xx, idx;
     int size_x, size_y;
@@ -287,6 +322,7 @@ void gauss_v2() {
 
     #pragma omp parallel private(it, x, y, xx, idx, sum)
     {
+        // Proper parallel initialization of grid and f
         #pragma omp for
         for (xx=1; xx<nx; xx+=2) {
             for (y=1; y<ny; ++y) {
@@ -298,13 +334,13 @@ void gauss_v2() {
                 if (x >= nx)
                     continue;
 
+                // Initialize borders
                 if (x == 1) {
                     grid_black[IDX2(x-1, y)] = 0;
                 }
                 else if (x == nx-1) {
                     grid_black[IDX2(x+1, y)] = 0;
                 }
-
                 if (y == 1) {
                     grid_black[IDX2(x, y-1)] = 0;
                 }
@@ -313,12 +349,10 @@ void gauss_v2() {
                 }
 
                 idx = IDX2(x, y);
-
                 grid_red[idx] = 0;
                 f_red[idx] = F(x, y);
             }
         }
-
         #pragma omp for
         for (xx=1; xx<nx; xx+=2) {
             for (y=1; y<ny; ++y) {
@@ -330,13 +364,13 @@ void gauss_v2() {
                 if (x >= nx)
                     continue;
 
+                // Initialize borders
                 if (x == 1) {
                     grid_red[IDX2(x-1, y)] = 0;
                 }
                 else if (x == nx-1) {
                     grid_red[IDX2(x+1, y)] = 0;
                 }
-
                 if (y == 1) {
                     grid_red[IDX2(x, y-1)] = 0;
                 }
@@ -345,7 +379,6 @@ void gauss_v2() {
                 }
 
                 idx = IDX2(x, y);
-
                 grid_black[idx] = 0;
                 f_black[idx] = F(x, y);
             }
@@ -426,8 +459,8 @@ void gauss_v2() {
 
     end_time = omp_get_wtime();
 
+    // Copy solution from grid_red/grid_black into grid_current
     grid_current = (double*) malloc((nx+1) * (ny+1) * sizeof(double));
-
     for (xx=0; xx<nx+1; xx+=2) {
         for (y=0; y<ny+1; ++y) {
             if (y % 2 == 0)
@@ -448,6 +481,7 @@ void gauss_v2() {
         }
     }
 
+    // Calculate residue and output solution
     residue = 0;
     for (x=0; x<(nx+1); ++x) {
         for (y=0; y<(ny+1); ++y) {
@@ -478,7 +512,15 @@ void gauss_v2() {
     free(f_red);
     free(f_black);
 }
+#endif
 
+#if GAUSS_VERSION == 3
+// Método Red-Black Gauss-Seidel Versão 3
+//
+// Implementação paralela do algoritmo Red-Black Gauss-Seidel com
+// mapeamento do grid em dois vetores: red e black onde cada posição de
+// cada vetor contém dois pontos e ambos são calculados ao mesmo tempo
+// em uma única instrução SIMD.
 void gauss_v3() {
     int it, x, y, bx, by, idx;
     int size_x, size_y;
@@ -513,21 +555,23 @@ void gauss_v3() {
 
     #pragma omp parallel private(it, bx, by, idx, sum_x, sum_y)
     {
+        // Proper parallel initialization of grid and f
         #pragma omp for
         for (bx = 1; bx < size_x-1; ++bx) {
             for (by = 1; by < size_y-1-PADDING; ++by) {
                 idx = bx * size_y + by;
 
+                // Fill correction_{x,y} arrays
                 if (by == 1) {
                     correction_x[bx] = 0;
                     if ((nx % 2 == 0) && (2*bx == nx))
                         correction_x[bx] = size_y;
                 }
-
                 correction_y[by] = 0;
                 if ((ny % 2 == 0) && (2*by == ny))
                     correction_y[by] = 1;
 
+                // Initialize borders
                 if (bx == 0) {
                     grid_red[idx-size_y][0]   = 0;
                     grid_red[idx-size_y][1]   = 0;
@@ -540,7 +584,6 @@ void gauss_v3() {
                     grid_black[idx+size_y][0] = 0;
                     grid_black[idx+size_y][1] = 0;
                 }
-
                 if (by == 0) {
                     grid_red[idx-1][0]   = 0;
                     grid_red[idx-1][1]   = 0;
@@ -603,8 +646,8 @@ void gauss_v3() {
 
     end_time = omp_get_wtime();
 
+    // Copy solution from grid_red/grid_black into grid_current
     grid_current = (double*) malloc((nx+1) * (ny+1) * sizeof(double));
-
     for (bx = 1; bx < size_x-1; ++bx) {
         for (by = 1; by < size_y-1-PADDING; ++by) {
             idx = bx * size_y + by;
@@ -615,7 +658,6 @@ void gauss_v3() {
             grid_current[(2*bx-1)*(ny+1) + (2*by)  ] = grid_black[idx][1];
         }
     }
-
     for (x=0; x<(nx+1); ++x) {
         grid_current[x*(ny+1) + 0] = 0;
         grid_current[x*(ny+1) + ny] = BORDER(x);
@@ -625,6 +667,7 @@ void gauss_v3() {
         grid_current[nx*(ny+1) + y] = 0;
     }
 
+    // Calculate residue and output solution
     residue = 0;
     for (x=0; x<(nx+1); ++x) {
         for (y=0; y<(ny+1); ++y) {
@@ -657,6 +700,8 @@ void gauss_v3() {
     free(correction_x);
     free(correction_y);
 }
+#endif
+
 
 int main(int argc, char **argv) {
     if (argc != 6) {
@@ -696,12 +741,22 @@ int main(int argc, char **argv) {
     // calculate using the appropriate method
     switch (argv[5][0]) {
     case 'j':
+        printf("Calculando u(x,y) pelo método Jacobi.\n");
         jacobi();
         break;
     case 'g':
-        // gauss_v1();
-        // gauss_v2();
+        printf("Calculando u(x,y) pelo método Red-Black Gauss-Seidel (versão %d).\n", GAUSS_VERSION);
+
+#if GAUSS_VERSION == 1
+        gauss_v1();
+#elif GAUSS_VERSION == 2
+        gauss_v2();
+#elif GAUSS_VERSION == 3
         gauss_v3();
+#else
+#error "Versão do método Gauss-Seidel inválida! Versões válidas são: 1, 2 ou 3."
+#endif
+
         break;
     default:
         fprintf(stderr, "error: '%s' is not a valid calculation method (valid options are 'j' for Jacobi or 'g' for Gauss-Seidel)\n", argv[5]);

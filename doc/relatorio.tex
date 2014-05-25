@@ -1,0 +1,102 @@
+\documentclass[12pt,a4paper]{ufpr}
+
+\usepackage[brazil]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb,amsmath}
+\usepackage{epsfig}
+\usepackage{multirow}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{ps-macros}
+\usepackage[linktocpage=true]{hyperref}
+\usepackage{makeidx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xspace}
+
+\floatname{algorithm}{Algoritmo}
+\renewcommand\algorithmicend{\textbf{fim}}
+\renewcommand\algorithmicdo{\textbf{faça}}
+\renewcommand\algorithmicwhile{\textbf{enquanto}}
+\renewcommand\algorithmicfor{\textbf{para}}
+\renewcommand\algorithmicforall{\textbf{para todo}}
+\renewcommand\algorithmicif{\textbf{se}}
+\renewcommand\algorithmicthen{\textbf{então}}
+\renewcommand\algorithmicelse{\textbf{senão}}
+\renewcommand\algorithmicreturn{\textbf{retorne}}
+\algnewcommand\algorithmicforeach{\textbf{para cada}}
+\algdef{S}[FOR]{ForEach}[1]{\algorithmicforeach\ #1\ \algorithmicdo}%
+
+\setcounter{secnumdepth}{3}    % n - numero de niveis de subsubsection numeradas
+\setcounter{tocdepth}{3}       % coloca ate o nivel n no sumario
+
+\title{Avaliação de estratégias de treinamento de redes neurais aplicadas ao problema de formação de caminho por enxames de robôs}
+\author{Eduardo Luís Buratti}
+\advisorplace{Departamento de Informática, UFPR} % departamento, instituicao
+\city{Curitiba}
+\year{2014}
+
+\makeindex
+
+\begin{document}
+
+\newcommand{\fitness}{\textit{fitness}\xspace}
+\newcommand{\fitnessp}{\textit{fitness}\xspace} % plural
+
+\pdfstringdefDisableCommands{%
+    \let\MakeUppercase\relax
+}
+
+\makecapamonografia
+% \makerostomonografia
+% \maketermo
+
+%\singlespacing
+\onehalfspacing
+%\doublespacing
+
+\pagestyle{headings}
+\pagenumbering{roman}
+
+% \chapter*{Resumo}
+% \addcontentsline{toc}{chapter}{RESUMO}
+% \input{resumo.tex}
+% \newpage
+
+% \listoffigures
+% \addcontentsline{toc}{chapter}{LISTA DE FIGURAS}
+% \newpage
+
+% \listoftables
+% \addcontentsline{toc}{chapter}{LISTA DE TABELAS}
+% \newpage
+
+\tableofcontents
+\addcontentsline{toc}{chapter}{SUMÁRIO}
+\newpage
+
+\pagenumbering{arabic}
+
+\input{capitulo1.tex}
+\input{capitulo2.tex}
+\input{capitulo3.tex}
+
+\bibliographystyle{brazil}
+\bibliography{referencias}
+% utilize macros (3 primeiras letras do mes em ingles, minusculas) no seu
+% .bib para atribuir o nome do mes em portugues nas referencia,
+% se o style for brazil, outros estilos tambem aceitam estas macros
+% Ex:
+%
+% @InProceedings{teste,
+%   author =       {Luciano}
+%   year =         {2000}
+%   month =        {}#sep;
+% }
+
+\addcontentsline{toc}{chapter}{BIBLIOGRAFIA}
+
+\end{document}

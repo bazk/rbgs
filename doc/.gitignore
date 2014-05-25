@@ -1,0 +1,12 @@
+*.aux
+*.bbl
+*.blg
+*.lof
+*.log
+*.lot
+*.toc
+*.out
+*.idx
+relatorio.pdf
+relatorio.ps
+relatorio.dvi
